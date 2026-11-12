@@ -1,0 +1,22 @@
+{
+    "findings": [
+        {
+            "title": "Sample Security Configuration Finding",
+            "description": "This is synthetic demonstration data used to verify the SentryAI reporting workflow. It is not a confirmed vulnerability.",
+            "severity": "Medium",
+            "target": "http://127.0.0.1:4280",
+            "recommendation": "Review the application's security configuration and apply appropriate defensive settings.",
+            "evidence": "Synthetic demonstration evidence only.",
+            "source": "SentryAI Sample Data"
+        },
+        {
+            "title": "Sample Informational Finding",
+            "description": "This sample demonstrates how informational findings are represented in SentryAI.",
+            "severity": "Informational",
+            "target": "http://127.0.0.1:4280",
+            "recommendation": "Review the information and determine whether further assessment is necessary.",
+            "evidence": "Synthetic demonstration evidence only.",
+            "source": "SentryAI Sample Data"
+        }
+    ]
+}
