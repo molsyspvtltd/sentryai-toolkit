@@ -1,5 +1,7 @@
-"""Offline demonstration of the SentryAI assessment workflow."""
 
+"""Import saved scanner JSON and generate SentryAI reports."""
+
+import argparse
 from pathlib import Path
 
 from toolkit.assessment import AssessmentWorkflow
@@ -11,37 +13,62 @@ def main():
     project_dir = Path(__file__).resolve().parent
     sample_file = project_dir / "examples" / "sample_scan_results.json"
 
-    if not sample_file.is_file():
-        print("Sample results file not found.")
+    parser = argparse.ArgumentParser(
+        description="Import saved JSON findings into SentryAI."
+    )
+    parser.add_argument(
+        "input_file",
+        nargs="?",
+        default=str(sample_file),
+        help="Path to a saved SentryAI-compatible scanner JSON file.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=str(project_dir / "reports"),
+        help="Directory for generated reports.",
+    )
+
+    args = parser.parse_args()
+
+    input_file = Path(args.input_file).expanduser().resolve()
+    output_dir = Path(args.output_dir).expanduser().resolve()
+
+    if not input_file.is_file():
+        print(f"Input file not found: {input_file}")
+        return 1
+
+    try:
+        payload = input_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Could not read input file: {exc}")
         return 1
 
     config = SentryAIConfig(
         target_url="http://127.0.0.1:4280",
         testing_scope="local-dvwa",
-        output_dir=project_dir / "reports",
+        output_dir=output_dir,
     )
 
-    payload = sample_file.read_text(encoding="utf-8")
-
-    def offline_scanner(received_config):
+    def saved_results_importer(received_config):
         return findings_from_json(payload, received_config)
 
     workflow = AssessmentWorkflow(
         config=config,
-        scanner=offline_scanner,
-        output_dir=config.output_dir,
+        scanner=saved_results_importer,
+        output_dir=output_dir,
     )
 
     result = workflow.run()
 
-    print("\n========== SENTRYAI DEMO ==========")
+    print("\n========== SENTRYAI IMPORT ==========")
+    print(f"Input file: {input_file}")
     print(f"Assessment status: {result.status.value}")
 
     if result.status.value != "Completed":
-        print(f"Error: {result.error}")
+        print(f"Import failed: {result.error}")
         return 1
 
-    print(f"Total sample findings: {result.findings.count()}")
+    print(f"Imported findings: {result.findings.count()}")
 
     print("\nSeverity summary:")
     for severity, count in result.findings.summary().items():
@@ -51,8 +78,11 @@ def main():
     print(f"JSON: {result.json_report}")
     print(f"Markdown: {result.markdown_report}")
 
-    print("\nNote: These are synthetic demonstration findings.")
-    print("No live security scan was performed.")
+    if input_file == sample_file.resolve():
+        print("\nNote: The default sample contains synthetic findings.")
+    else:
+        print("\nNote: Results were imported from a saved JSON file.")
+        print("Verify the source and assessment evidence separately.")
 
     return 0
 
