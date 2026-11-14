@@ -105,3 +105,82 @@ def test_unexpected_target_is_rejected():
 def test_non_string_payload_is_rejected():
     with pytest.raises(TypeError):
         findings_from_json({}, CONFIG)
+
+
+def test_neurosploit_native_array_is_supported():
+    payload = json.dumps([
+        {
+            "id": "ns-001",
+            "agent": "test-agent",
+            "title": "Sample NeuroSploit finding",
+            "severity": "high",
+            "endpoint": TARGET,
+            "impact": "Synthetic impact description.",
+            "evidence": "Synthetic evidence.",
+            "remediation": "Review the application configuration.",
+            "cwe": "CWE-79",
+            "cvss": "7.1",
+            "confidence": 0.9,
+            "validated": True,
+        }
+    ])
+
+    result = findings_from_json(payload, CONFIG)
+
+    assert result.count() == 1
+
+    finding = result.all()[0]
+    assert finding.title == "Sample NeuroSploit finding"
+    assert finding.severity == Severity.HIGH
+    assert finding.source == "NeuroSploit"
+    assert finding.finding_id == "ns-001"
+    assert finding.target == TARGET
+    assert "CWE-79" in finding.evidence
+
+
+def test_neurosploit_info_severity_is_supported():
+    payload = json.dumps([
+        {
+            "id": "ns-002",
+            "title": "Informational sample",
+            "severity": "Info",
+            "endpoint": TARGET,
+        }
+    ])
+
+    result = findings_from_json(payload, CONFIG)
+
+    assert result.all()[0].severity == Severity.INFORMATIONAL
+
+
+def test_neurosploit_empty_array_returns_empty_collection():
+    result = findings_from_json("[]", CONFIG)
+
+    assert result.count() == 0
+
+
+def test_neurosploit_external_endpoint_is_rejected():
+    payload = json.dumps([
+        {
+            "id": "ns-003",
+            "title": "Unexpected target",
+            "severity": "High",
+            "endpoint": "https://example.com",
+        }
+    ])
+
+    with pytest.raises(ValueError, match="unexpected target"):
+        findings_from_json(payload, CONFIG)
+
+
+def test_neurosploit_missing_title_is_rejected():
+    payload = json.dumps([
+        {
+            "id": "ns-004",
+            "severity": "Medium",
+            "endpoint": TARGET,
+        }
+    ])
+
+    with pytest.raises(ValueError, match="invalid title"):
+        findings_from_json(payload, CONFIG)

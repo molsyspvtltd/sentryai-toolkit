@@ -7,6 +7,7 @@ from pathlib import Path
 from toolkit.assessment import AssessmentWorkflow
 from toolkit.config import SentryAIConfig
 from toolkit.result_adapter import findings_from_json
+from toolkit.neurosploit_results import load_neurosploit_results
 
 
 def main():
@@ -20,7 +21,7 @@ def main():
         "input_file",
         nargs="?",
         default=str(sample_file),
-        help="Path to a saved SentryAI-compatible scanner JSON file.",
+        help="Path to saved SentryAI or NeuroSploit JSON results.",
     )
     parser.add_argument(
         "--output-dir",
@@ -48,8 +49,13 @@ def main():
         testing_scope="local-dvwa",
         output_dir=output_dir,
     )
-
     def saved_results_importer(received_config):
+        if input_file.name.lower() == "findings.json":
+            return load_neurosploit_results(
+                input_file,
+                received_config,
+            )
+
         return findings_from_json(payload, received_config)
 
     workflow = AssessmentWorkflow(
@@ -59,7 +65,6 @@ def main():
     )
 
     result = workflow.run()
-
     print("\n========== SENTRYAI IMPORT ==========")
     print(f"Input file: {input_file}")
     print(f"Assessment status: {result.status.value}")
