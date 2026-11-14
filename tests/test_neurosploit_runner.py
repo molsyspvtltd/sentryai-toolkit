@@ -1,86 +1,156 @@
 
+"""Tests for safe NeuroSploit CLI verification."""
+
 import subprocess
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
 from toolkit.config import SentryAIConfig
-from toolkit.neurosploit_runner import run_neurosploit
+from toolkit.neurosploit_runner import (
+    check_neurosploit,
+    resolve_neurosploit_path,
+)
 
 
 @pytest.fixture
 def config():
     return SentryAIConfig(
-        target_url="http://127.0.0.1:8080",
+        target_url="http://127.0.0.1:4280",
         testing_scope="local-dvwa",
     )
 
 
-def test_runner_builds_offline_command(config, tmp_path):
+def test_resolve_explicit_executable_path(tmp_path):
     executable = tmp_path / "neurosploit.exe"
     executable.touch()
 
-    expected = subprocess.CompletedProcess(
-        args=[],
-        returncode=0,
-        stdout="Offline pipeline completed",
-        stderr="",
+    result = resolve_neurosploit_path(executable)
+
+    assert result == executable.resolve()
+
+
+def test_resolve_executable_from_environment(tmp_path, monkeypatch):
+    executable = tmp_path / "neurosploit.exe"
+    executable.touch()
+
+    monkeypatch.setenv("NEUROSPLOIT_PATH", str(executable))
+
+    result = resolve_neurosploit_path()
+
+    assert result == executable.resolve()
+
+
+def test_resolve_executable_from_path(monkeypatch):
+    monkeypatch.delenv("NEUROSPLOIT_PATH", raising=False)
+    monkeypatch.setattr(
+        "toolkit.neurosploit_runner.shutil.which",
+        lambda command: "C:/tools/neurosploit.exe"
+        if command == "neurosploit"
+        else None,
     )
 
-    with patch(
-        "toolkit.neurosploit_runner.subprocess.run",
-        return_value=expected,
-    ) as mocked_run:
-        result = run_neurosploit(config, executable)
+    result = resolve_neurosploit_path()
 
-    assert result.returncode == 0
+    assert result == Path("C:/tools/neurosploit.exe").resolve()
 
-    args, kwargs = mocked_run.call_args
-    assert args[0] == [
-        str(executable),
-        "run",
-        "http://127.0.0.1:8080",
-        "--offline",
+
+def test_missing_executable_raises_error(monkeypatch):
+    monkeypatch.delenv("NEUROSPLOIT_PATH", raising=False)
+    monkeypatch.setattr(
+        "toolkit.neurosploit_runner.shutil.which",
+        lambda command: None,
+    )
+
+    with pytest.raises(FileNotFoundError, match="NeuroSploit not found"):
+        resolve_neurosploit_path()
+
+
+def test_successful_cli_checks(config, tmp_path, monkeypatch):
+    executable = tmp_path / "neurosploit.exe"
+    executable.touch()
+
+    responses = [
+        Mock(returncode=0, stdout="neurosploit 4.4.0", stderr=""),
+        Mock(returncode=0, stdout='{"total":485}', stderr=""),
     ]
-    assert kwargs["capture_output"] is True
-    assert kwargs["text"] is True
+
+    mocked_run = Mock(side_effect=responses)
+    monkeypatch.setattr(
+        "toolkit.neurosploit_runner.subprocess.run",
+        mocked_run,
+    )
+
+    result = check_neurosploit(config, executable)
+
+    assert result["version"] == "neurosploit 4.4.0"
+    assert result["agents"] == '{"total":485}'
+    assert mocked_run.call_count == 2
+
+    commands = [
+        call.args[0] for call in mocked_run.call_args_list
+    ]
+    assert commands[0] == [str(executable), "--version"]
+    assert commands[1] == [str(executable), "agents"]
 
 
-def test_runner_rejects_external_target(config, tmp_path):
+def test_external_target_is_rejected(config, tmp_path, monkeypatch):
     executable = tmp_path / "neurosploit.exe"
     executable.touch()
     config.target_url = "https://example.com"
 
-    with patch(
-        "toolkit.neurosploit_runner.subprocess.run"
-    ) as mocked_run:
-        with pytest.raises(ValueError):
-            run_neurosploit(config, executable)
+    mocked_run = Mock()
+    monkeypatch.setattr(
+        "toolkit.neurosploit_runner.subprocess.run",
+        mocked_run,
+    )
+
+    with pytest.raises(ValueError):
+        check_neurosploit(config, executable)
 
     mocked_run.assert_not_called()
 
 
-def test_runner_rejects_missing_executable(config, tmp_path):
-    missing = tmp_path / "missing.exe"
-
-    with pytest.raises(FileNotFoundError):
-        run_neurosploit(config, missing)
-
-
-def test_runner_reports_process_failure(config, tmp_path):
+def test_cli_failure_raises_runtime_error(config, tmp_path, monkeypatch):
     executable = tmp_path / "neurosploit.exe"
     executable.touch()
 
-    failure = subprocess.CompletedProcess(
-        args=[],
-        returncode=1,
-        stdout="",
-        stderr="CLI error",
+    mocked_run = Mock(
+        return_value=Mock(
+            returncode=1,
+            stdout="",
+            stderr="CLI error",
+        )
+    )
+    monkeypatch.setattr(
+        "toolkit.neurosploit_runner.subprocess.run",
+        mocked_run,
     )
 
-    with patch(
+    with pytest.raises(RuntimeError, match="CLI error"):
+        check_neurosploit(config, executable)
+
+
+def test_cli_timeout_raises_timeout_error(config, tmp_path, monkeypatch):
+    executable = tmp_path / "neurosploit.exe"
+    executable.touch()
+
+    mocked_run = Mock(
+        side_effect=subprocess.TimeoutExpired(
+            cmd="neurosploit",
+            timeout=30,
+        )
+    )
+    monkeypatch.setattr(
         "toolkit.neurosploit_runner.subprocess.run",
-        return_value=failure,
-    ):
-        with pytest.raises(RuntimeError, match="CLI error"):
-            run_neurosploit(config, executable)
+        mocked_run,
+    )
+
+    with pytest.raises(TimeoutError, match="version check timed out"):
+        check_neurosploit(config, executable)
+
+
+
+
+

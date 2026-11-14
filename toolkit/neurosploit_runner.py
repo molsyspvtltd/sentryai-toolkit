@@ -1,53 +1,85 @@
 
-"""Safe subprocess wrapper for the NeuroSploit CLI."""
+"""Safe CLI integration for checking the NeuroSploit installation."""
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
 from toolkit.config import SentryAIConfig
 
 
-def run_neurosploit(
+def resolve_neurosploit_path(
+    executable_path: str | Path | None = None,
+) -> Path:
+    """Find NeuroSploit using an explicit path, environment variable, or PATH."""
+
+    candidate = executable_path or os.environ.get("NEUROSPLOIT_PATH")
+
+    if candidate:
+        executable = Path(candidate).expanduser()
+
+        if not executable.is_file():
+            raise FileNotFoundError(
+                f"NeuroSploit executable not found: {executable}"
+            )
+
+        return executable.resolve()
+
+    for command in ("neurosploit", "neurosploit.exe"):
+        discovered = shutil.which(command)
+
+        if discovered:
+            return Path(discovered).resolve()
+
+    raise FileNotFoundError(
+        "NeuroSploit not found. Set NEUROSPLOIT_PATH "
+        "or add it to your system PATH."
+    )
+
+
+def check_neurosploit(
     config: SentryAIConfig,
-    executable_path: str | Path,
-    timeout: int = 120,
-) -> subprocess.CompletedProcess[str]:
-    """Run NeuroSploit in offline mode against an approved local target."""
+    executable_path: str | Path | None = None,
+    timeout: int = 30,
+) -> dict[str, str]:
+    """Verify the local target configuration and NeuroSploit CLI.
 
-    # Reject an unapproved target before launching another process.
+    This function only checks the CLI version and agent inventory.
+    It does not launch a security scan.
+    """
+
     config.validate()
+    executable = resolve_neurosploit_path(executable_path)
 
-    executable = Path(executable_path)
+    checks = {}
 
-    if not executable.is_file():
-        raise FileNotFoundError(
-            f"NeuroSploit executable not found: {executable}"
-        )
+    commands = {
+        "version": [str(executable), "--version"],
+        "agents": [str(executable), "agents"],
+    }
 
-    command = [
-        str(executable),
-        "run",
-        config.target_url,
-        "--offline",
-    ]
+    for name, command in commands.items():
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(
+                f"NeuroSploit {name} check timed out."
+            ) from exc
 
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise TimeoutError(
-            f"NeuroSploit exceeded the {timeout}-second timeout."
-        ) from exc
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"NeuroSploit {name} check failed: {result.stderr}"
+            )
 
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"NeuroSploit failed with exit code {result.returncode}: "
-            f"{result.stderr}"
-        )
+        checks[name] = result.stdout.strip()
 
-    return result
+    return checks
+
+
