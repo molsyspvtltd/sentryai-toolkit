@@ -30,7 +30,7 @@ def load_neurosploit_results(
         )
 
     try:
-        payload = path.read_text(encoding="utf-8")
+        payload = result_file.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError as exc:
         raise ValueError(
             "NeuroSploit result file must use UTF-8 encoding."

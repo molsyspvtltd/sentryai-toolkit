@@ -60,3 +60,23 @@ def test_invalid_saved_json_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="Invalid JSON"):
         load_neurosploit_results(result_file, CONFIG)
+def test_load_neurosploit_results_accepts_utf8_bom(tmp_path):
+    from toolkit.config import SentryAIConfig
+    from toolkit.neurosploit_results import load_neurosploit_results
+
+    result_file = tmp_path / "findings.json"
+    result_file.write_text(
+        '[{"id":"SYN-001","title":"Test finding",'
+        '"severity":"medium","endpoint":"http://127.0.0.1:4280"}]',
+        encoding="utf-8-sig",
+    )
+
+    config = SentryAIConfig(
+        target_url="http://127.0.0.1:4280",
+        testing_scope="local-dvwa",
+        output_dir=tmp_path,
+    )
+
+    findings = load_neurosploit_results(result_file, config)
+
+    assert findings.count() == 1
